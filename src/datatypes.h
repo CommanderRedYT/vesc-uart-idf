@@ -20,8 +20,7 @@
 #ifndef DATATYPES_H_
 #define DATATYPES_H_
 
-#include <stdint.h>
-#include <stdbool.h>
+#include <cstdint>
 
 // Data types
 typedef enum {
@@ -1242,5 +1241,39 @@ typedef struct __attribute__((packed)) {
 	uint32_t runtime_init_flag;
 	uint64_t runtime; // Seconds
 } backup_data;
+
+struct dataPackage
+{
+    float avgMotorCurrent;
+    float avgInputCurrent;
+    float dutyCycleNow;
+    float rpm;
+    float inpVoltage;
+    float ampHours;
+    float ampHoursCharged;
+    float wattHours;
+    float wattHoursCharged;
+    long tachometer;
+    long tachometerAbs;
+    float tempMosfet;
+    float tempMotor;
+    float pidPos;
+    uint8_t id;
+    mc_fault_code error;
+};
+
+struct FWversionPackage
+{
+    uint8_t major;
+    uint8_t minor;
+};
+
+struct vesc_uart_config_t
+{
+    uart_config_t config;
+    uart_port_t uart_num;
+    int tx_pin;
+    int rx_pin;
+};
 
 #endif /* DATATYPES_H_ */

@@ -17,9 +17,11 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
     */
 
+// system includes
+#include <cmath>
+
+// local includes
 #include "buffer.h"
-#include <math.h>
-#include <stdbool.h>
 
 void buffer_append_int16(uint8_t* buffer, int16_t number, int32_t *index) {
 	buffer[(*index)++] = number >> 8;
