@@ -188,7 +188,7 @@ class VescUart
 		 * @param      data  - Data array to print
 		 * @param      len   - Lenght of the array to print
 		 */
-		std::string serialPrint(uint8_t* data, int len);
+		static std::string serialPrint(uint8_t* data, int len);
 };
 
 #endif // VESCUART_h

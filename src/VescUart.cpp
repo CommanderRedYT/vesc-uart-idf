@@ -56,7 +56,6 @@ int VescUart::receiveUartMessage(uint8_t* payloadReceived)
 	bool messageRead{false};
 	uint8_t messageReceived[256];
 	uint16_t lenPayload{0};
-    bool exit{false};
 
     auto read = [&]() -> int {
         uint8_t c = 0;
@@ -70,12 +69,18 @@ int VescUart::receiveUartMessage(uint8_t* payloadReceived)
         }
     };
 
-	while (espchrono::ago(start) < m_timeout && !messageRead && !exit)
+	while (espchrono::ago(start) < m_timeout && !messageRead)
     {
         size_t length{};
 
-        while (!exit)
+        while (true)
         {
+            if (counter >= sizeof(messageReceived))
+            {
+                ESP_LOGW(TAG, "Message is too large");
+                break;
+            }
+
             if (const auto result = uart_get_buffered_data_len(serialConfig->uart_num, &length); result != ESP_OK)
             {
                 ESP_LOGW(TAG, "uart_get_buffered_data_len() failed with %s", esp_err_to_name(result));
@@ -87,21 +92,22 @@ int VescUart::receiveUartMessage(uint8_t* payloadReceived)
             // ESP_LOGI(TAG, "c=%d", c);
             messageReceived[counter++] = c;
 
-            ESP_LOGI(TAG, "counter=%d messageReceived[%d]=%d messageReceived=%s", counter, counter - 1, messageReceived[counter - 1], serialPrint(messageReceived, counter).c_str());
+            ESP_LOGI(TAG, "messageReceived=%s", serialPrint(messageReceived, counter).c_str());
 
             if (counter == 2)
             {
-                switch (messageReceived[1])
+                switch (messageReceived[0])
                 {
                     case 2:
-                        endMessage = messageReceived[2] + 5;
-                        lenPayload = messageReceived[2];
+                        ESP_LOGI(TAG, "messageReceived[1]=%d", messageReceived[1]);
+                        endMessage = messageReceived[1] + 5;
+                        lenPayload = messageReceived[1];
                         break;
                     case 3:
                         ESP_LOGW(TAG, "Message is larger than 256 bytes - not supported");
                         break;
                     default:
-                        ESP_LOGW(TAG, "Unknown message type: %d", messageReceived[1]);
+                        ESP_LOGW(TAG, "Unknown message type: %d", messageReceived[0]);
                         break;
                 }
             }
@@ -109,11 +115,8 @@ int VescUart::receiveUartMessage(uint8_t* payloadReceived)
             if (counter >= sizeof(messageReceived))
             {
                 ESP_LOGW(TAG, "Message is too large");
-                exit = true;
                 break;
             }
-
-            ESP_LOGI(TAG, "counter=%d endMessage=%d messageReceived[endMessage - 1]=%d", counter, endMessage, messageReceived[endMessage - 1]);
 
             if (counter == endMessage && messageReceived[endMessage - 1] == 3)
             {
@@ -140,11 +143,13 @@ int VescUart::receiveUartMessage(uint8_t* payloadReceived)
 	if (unpacked)
     {
 		// Message was read
+        ESP_LOGI(TAG, "Message read, payload=%s length=%d", serialPrint(payloadReceived, lenPayload).c_str(), lenPayload);
 		return lenPayload; 
 	}
 	else
     {
 		// No Message Read
+        ESP_LOGI(TAG, "No message read");
 		return 0;
 	}
 }
@@ -168,11 +173,11 @@ bool VescUart::unpackPayload(uint8_t* message, int lenMes, uint8_t* payload)
 
 	crcPayload = crc16(payload, message[1]);
 
-    ESP_LOGI(TAG, "CRC calculated: %d", crcPayload);
+    ESP_LOGI(TAG, "CRC calculated: %d matches=%s", crcPayload, crcPayload == crcMessage ? "true" : "false");
 	
 	if (crcPayload == crcMessage)
     {
-        ESP_LOGI(TAG, "message=%s payload=%s", message, payload);
+        ESP_LOGI(TAG, "message=%s payload=%s", serialPrint(message, lenMes).c_str(), serialPrint(payload, message[1]).c_str());
 
 		return true;
 	}
@@ -232,6 +237,7 @@ int VescUart::packSendPayload(uint8_t* payload, int lenPay)
 
 bool VescUart::processReadPacket(uint8_t* message)
 {
+    ESP_LOGI(TAG, "processReadPacket");
 
 	COMM_PACKET_ID packetId;
 	int32_t index = 0;
@@ -346,6 +352,8 @@ bool VescUart::getVescValues(uint8_t canId)
     {
 		return processReadPacket(message); 
 	}
+
+    ESP_LOGI(TAG, "Message length: %d", messageLength);
 
 	return false;
 }
