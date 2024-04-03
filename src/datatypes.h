@@ -22,6 +22,9 @@
 
 #include <cstdint>
 
+// esp-idf includes
+#include <driver/uart.h>
+
 // Data types
 typedef enum {
 	HW_TYPE_VESC = 0,

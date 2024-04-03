@@ -7,6 +7,7 @@ constexpr const char * const TAG = "VescUart";
 
 // esp-idf includes
 #include <esp_log.h>
+#include <esp_task_wdt.h>
 
 // 3rdparty lib includes
 #include <espchrono.h>
@@ -36,6 +37,12 @@ void VescUart::setSerialPort(const vesc_uart_config_t& cfg)
         return;
     }
 
+    if (const auto res = uart_set_rx_timeout(cfg.uart_num, 1); res != ESP_OK)
+    {
+        ESP_LOGE(TAG, "uart_set_rx_timeout failed: %s", esp_err_to_name(res));
+        return;
+    }
+
     serialConfig = cfg;
 }
 
@@ -59,7 +66,7 @@ int VescUart::receiveUartMessage(uint8_t* payloadReceived)
 
     auto read = [&]() -> int {
         uint8_t c = 0;
-        if (uart_read_bytes(serialConfig->uart_num, &c, 1, 0) == 1)
+        if (const auto res = uart_read_bytes(serialConfig->uart_num, &c, 1, 0); res == 1)
         {
             return c;
         }
@@ -77,51 +84,52 @@ int VescUart::receiveUartMessage(uint8_t* payloadReceived)
         {
             if (counter >= sizeof(messageReceived))
             {
-                ESP_LOGW(TAG, "Message is too large");
+                ESP_LOGD(TAG, "Message is too large");
                 break;
             }
 
             if (const auto result = uart_get_buffered_data_len(serialConfig->uart_num, &length); result != ESP_OK)
             {
-                ESP_LOGW(TAG, "uart_get_buffered_data_len() failed with %s", esp_err_to_name(result));
+                ESP_LOGD(TAG, "uart_get_buffered_data_len() failed with %s", esp_err_to_name(result));
+                break;
+            }
+
+            if (!length)
+            {
                 break;
             }
 
             const auto c = read();
 
-            // ESP_LOGI(TAG, "c=%d", c);
             messageReceived[counter++] = c;
-
-            ESP_LOGI(TAG, "messageReceived=%s", serialPrint(messageReceived, counter).c_str());
 
             if (counter == 2)
             {
                 switch (messageReceived[0])
                 {
                     case 2:
-                        ESP_LOGI(TAG, "messageReceived[1]=%d", messageReceived[1]);
                         endMessage = messageReceived[1] + 5;
                         lenPayload = messageReceived[1];
                         break;
                     case 3:
-                        ESP_LOGW(TAG, "Message is larger than 256 bytes - not supported");
+                        ESP_LOGD(TAG, "Message is larger than 256 bytes - not supported");
                         break;
                     default:
-                        ESP_LOGW(TAG, "Unknown message type: %d", messageReceived[0]);
+                        ESP_LOGD(TAG, "Unknown message type: %d", messageReceived[0]);
                         break;
                 }
             }
 
             if (counter >= sizeof(messageReceived))
             {
-                ESP_LOGW(TAG, "Message is too large");
+                ESP_LOGD(TAG, "Message is too large");
                 break;
             }
 
             if (counter == endMessage && messageReceived[endMessage - 1] == 3)
             {
                 messageReceived[endMessage] = 0;
-                ESP_LOGI(TAG, "Message received: %s", serialPrint(messageReceived, endMessage).c_str());
+                ESP_LOGD(TAG, "Message received: %s", serialPrint(messageReceived, endMessage).c_str());
                 messageRead = true;
                 break;
             }
@@ -130,7 +138,7 @@ int VescUart::receiveUartMessage(uint8_t* payloadReceived)
 
 	if (!messageRead)
     {
-		ESP_LOGE(TAG, "Timeout reached while waiting for message");
+		ESP_LOGD(TAG, "Timeout reached while waiting for message");
 	}
 	
 	bool unpacked{false};
@@ -143,13 +151,13 @@ int VescUart::receiveUartMessage(uint8_t* payloadReceived)
 	if (unpacked)
     {
 		// Message was read
-        ESP_LOGI(TAG, "Message read, payload=%s length=%d", serialPrint(payloadReceived, lenPayload).c_str(), lenPayload);
+        ESP_LOGD(TAG, "Message read, payload=%s length=%d", serialPrint(payloadReceived, lenPayload).c_str(), lenPayload);
 		return lenPayload; 
 	}
 	else
     {
 		// No Message Read
-        ESP_LOGI(TAG, "No message read");
+        ESP_LOGD(TAG, "No message read");
 		return 0;
 	}
 }
@@ -166,18 +174,18 @@ bool VescUart::unpackPayload(uint8_t* message, int lenMes, uint8_t* payload)
 	crcMessage &= 0xFF00;
 	crcMessage += message[lenMes - 2];
 
-    ESP_LOGI(TAG, "CRC received: %d", crcMessage);
+    ESP_LOGD(TAG, "CRC received: %d", crcMessage);
 
 	// Extract payload:
 	memcpy(payload, &message[2], message[1]);
 
 	crcPayload = crc16(payload, message[1]);
 
-    ESP_LOGI(TAG, "CRC calculated: %d matches=%s", crcPayload, crcPayload == crcMessage ? "true" : "false");
+    ESP_LOGD(TAG, "CRC calculated: %d matches=%s", crcPayload, crcPayload == crcMessage ? "true" : "false");
 	
 	if (crcPayload == crcMessage)
     {
-        ESP_LOGI(TAG, "message=%s payload=%s", serialPrint(message, lenMes).c_str(), serialPrint(payload, message[1]).c_str());
+        ESP_LOGD(TAG, "message=%s payload=%s", serialPrint(message, lenMes).c_str(), serialPrint(payload, message[1]).c_str());
 
 		return true;
 	}
@@ -213,7 +221,7 @@ int VescUart::packSendPayload(uint8_t* payload, int lenPay)
 	messageSend[count++] = 3;
 	// messageSend[count] = NULL;
 
-    ESP_LOGI(TAG, "Package to send: %s", serialPrint(messageSend, count).c_str());
+    ESP_LOGD(TAG, "Package to send: %s", serialPrint(messageSend, count).c_str());
 
 	// Sending package
 	if (serialConfig)
@@ -221,12 +229,12 @@ int VescUart::packSendPayload(uint8_t* payload, int lenPay)
         // serialConfig->write(messageSend, count);
         if (const auto writtenBytes = uart_write_bytes(serialConfig->uart_num, messageSend, count); writtenBytes < 0)
         {
-            ESP_LOGE(TAG, "uart_write_bytes failed: %s", esp_err_to_name(writtenBytes));
+            ESP_LOGD(TAG, "uart_write_bytes failed: %s", esp_err_to_name(writtenBytes));
             return -1;
         }
         else
         {
-            ESP_LOGI(TAG, "successfully sent %d bytes", writtenBytes);
+            ESP_LOGD(TAG, "successfully sent %d bytes", writtenBytes);
         }
     }
 
@@ -237,7 +245,7 @@ int VescUart::packSendPayload(uint8_t* payload, int lenPay)
 
 bool VescUart::processReadPacket(uint8_t* message)
 {
-    ESP_LOGI(TAG, "processReadPacket");
+    ESP_LOGD(TAG, "processReadPacket");
 
 	COMM_PACKET_ID packetId;
 	int32_t index = 0;
@@ -324,8 +332,6 @@ bool VescUart::getVescValues()
 
 bool VescUart::getVescValues(uint8_t canId)
 {
-    ESP_LOGI(TAG, "Command: COMM_GET_VALUES %d", canId);
-
 	int32_t index = 0;
 
 	int payloadSize = (canId == 0 ? 1 : 3);
@@ -341,7 +347,7 @@ bool VescUart::getVescValues(uint8_t canId)
 
 	if (const auto sent = packSendPayload(payload, payloadSize); sent < 0)
     {
-        ESP_LOGE(TAG, "Failed to send payload");
+        ESP_LOGD(TAG, "Failed to send payload");
         return false;
     }
 
@@ -353,7 +359,7 @@ bool VescUart::getVescValues(uint8_t canId)
 		return processReadPacket(message); 
 	}
 
-    ESP_LOGI(TAG, "Message length: %d", messageLength);
+    ESP_LOGD(TAG, "Message length: %d", messageLength);
 
 	return false;
 }
@@ -491,20 +497,20 @@ void VescUart::printVescValues() const
 {
     ESP_LOGI(
             TAG,
-            "avgMotorCurrent=%f"
-            "avgInputCurrent=%f"
-            "dutyCycleNow=%f"
-            "rpm=%f"
-            "inputVoltage=%f"
-            "ampHours=%f"
-            "ampHoursCharged=%f"
-            "wattHours=%f"
-            "wattHoursCharged=%f"
-            "tachometer=%ld"
-            "tachometerAbs=%ld"
-            "tempMosfet=%f"
-            "tempMotor=%f"
-            "error=%d",
+            "avgMotorCurrent=%f\n"
+            "avgInputCurrent=%f\n"
+            "dutyCycleNow=%f\n"
+            "rpm=%f\n"
+            "inputVoltage=%f\n"
+            "ampHours=%f\n"
+            "ampHoursCharged=%f\n"
+            "wattHours=%f\n"
+            "wattHoursCharged=%f\n"
+            "tachometer=%ld\n"
+            "tachometerAbs=%ld\n"
+            "tempMosfet=%f\n"
+            "tempMotor=%f\n"
+            "error=%d\n",
             data.avgMotorCurrent,
             data.avgInputCurrent,
             data.dutyCycleNow,

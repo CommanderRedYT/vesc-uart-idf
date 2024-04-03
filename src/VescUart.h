@@ -7,6 +7,7 @@
 #include <optional>
 
 // esp-idf includes
+#include <esp_log.h>
 #include <driver/uart.h>
 
 // 3rdparty lib includes
@@ -33,6 +34,8 @@ class VescUart
 
 		/** Variabel to hold measurements returned from VESC */
 		dataPackage data{};
+
+        [[nodiscard]] const dataPackage& getData() const { return data; }
 
        /** Variable to hold firmware version */
         FWversionPackage fw_version{};
