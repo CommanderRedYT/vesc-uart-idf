@@ -26,19 +26,15 @@ class VescUart
 	//Timeout - specifies how long the function will wait for the vesc to respond
 	const espchrono::milliseconds32 m_timeout;
 
-	public:
+public:
+        [[nodiscard]] const dataPackage& getData() const { return m_data; }
+
+        [[nodiscard]] const FWversionPackage& getFWversionData() const { return m_fw_version; }
+
 		/**
 		 * @brief      Class constructor
 		 */
 		explicit VescUart(espchrono::milliseconds32 timeout_ms = 100ms);
-
-		/** Variabel to hold measurements returned from VESC */
-		dataPackage data{};
-
-        [[nodiscard]] const dataPackage& getData() const { return data; }
-
-       /** Variable to hold firmware version */
-        FWversionPackage fw_version{};
 
         /**
          * @brief      Set the serial port for uart communication
@@ -145,10 +141,17 @@ class VescUart
          */
         void printVescValues() const;
 
-	private: 
+	private:
+        /** Variabel to hold measurements returned from VESC */
+        dataPackage m_data{};
+
+        espchrono::millis_clock::time_point m_lastVescUpdate{};
+
+        /** Variable to hold firmware version */
+        FWversionPackage m_fw_version{};
 
 		/** Variabel to hold the reference to the Serial object to use for UART */
-        std::optional<vesc_uart_config_t> serialConfig{std::nullopt};
+        std::optional<vesc_uart_config_t> m_serialConfig{std::nullopt};
 
 		/**
 		 * @brief      Packs the payload and sends it over Serial

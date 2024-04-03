@@ -17,7 +17,7 @@ VescUart::VescUart(espchrono::milliseconds32 timeout_ms) : m_timeout(timeout_ms)
 
 void VescUart::setSerialPort(const vesc_uart_config_t& cfg)
 {
-    serialConfig = std::nullopt;
+    m_serialConfig = std::nullopt;
 
     if (const auto res = uart_driver_install(cfg.uart_num, 256, 0, 0, nullptr, 0); res != ESP_OK)
     {
@@ -43,7 +43,7 @@ void VescUart::setSerialPort(const vesc_uart_config_t& cfg)
         return;
     }
 
-    serialConfig = cfg;
+    m_serialConfig = cfg;
 }
 
 int VescUart::receiveUartMessage(uint8_t* payloadReceived)
@@ -53,7 +53,7 @@ int VescUart::receiveUartMessage(uint8_t* payloadReceived)
 	// Messages > 255 starts with "3" 2nd and 3rd byte is length combined with 1st >>8 and then &0xFF
 
 	// Makes no sense to run this function if no serialPort is defined.
-	if (!serialConfig)
+	if (!m_serialConfig)
 		return -1;
 
     const auto start = espchrono::millis_clock::now();
@@ -66,7 +66,7 @@ int VescUart::receiveUartMessage(uint8_t* payloadReceived)
 
     auto read = [&]() -> int {
         uint8_t c = 0;
-        if (const auto res = uart_read_bytes(serialConfig->uart_num, &c, 1, 0); res == 1)
+        if (const auto res = uart_read_bytes(m_serialConfig->uart_num, &c, 1, 0); res == 1)
         {
             return c;
         }
@@ -84,13 +84,13 @@ int VescUart::receiveUartMessage(uint8_t* payloadReceived)
         {
             if (counter >= sizeof(messageReceived))
             {
-                ESP_LOGD(TAG, "Message is too large");
+                ESP_LOGW(TAG, "Message is too large");
                 break;
             }
 
-            if (const auto result = uart_get_buffered_data_len(serialConfig->uart_num, &length); result != ESP_OK)
+            if (const auto result = uart_get_buffered_data_len(m_serialConfig->uart_num, &length); result != ESP_OK)
             {
-                ESP_LOGD(TAG, "uart_get_buffered_data_len() failed with %s", esp_err_to_name(result));
+                ESP_LOGE(TAG, "uart_get_buffered_data_len() failed with %s", esp_err_to_name(result));
                 break;
             }
 
@@ -112,17 +112,17 @@ int VescUart::receiveUartMessage(uint8_t* payloadReceived)
                         lenPayload = messageReceived[1];
                         break;
                     case 3:
-                        ESP_LOGD(TAG, "Message is larger than 256 bytes - not supported");
+                        ESP_LOGW(TAG, "Message is larger than 256 bytes - not supported");
                         break;
                     default:
-                        ESP_LOGD(TAG, "Unknown message type: %d", messageReceived[0]);
+                        ESP_LOGW(TAG, "Unknown message type: %d", messageReceived[0]);
                         break;
                 }
             }
 
             if (counter >= sizeof(messageReceived))
             {
-                ESP_LOGD(TAG, "Message is too large");
+                ESP_LOGW(TAG, "Message is too large");
                 break;
             }
 
@@ -138,7 +138,7 @@ int VescUart::receiveUartMessage(uint8_t* payloadReceived)
 
 	if (!messageRead)
     {
-		ESP_LOGD(TAG, "Timeout reached while waiting for message");
+		ESP_LOGW(TAG, "Timeout reached while waiting for message");
 	}
 	
 	bool unpacked{false};
@@ -157,7 +157,7 @@ int VescUart::receiveUartMessage(uint8_t* payloadReceived)
 	else
     {
 		// No Message Read
-        ESP_LOGD(TAG, "No message read");
+        ESP_LOGI(TAG, "No message read");
 		return 0;
 	}
 }
@@ -189,6 +189,8 @@ bool VescUart::unpackPayload(uint8_t* message, int lenMes, uint8_t* payload)
 
 		return true;
 	}
+
+    ESP_LOGW(TAG, "CRC mismatch");
 
     return false;
 }
@@ -224,12 +226,12 @@ int VescUart::packSendPayload(uint8_t* payload, int lenPay)
     ESP_LOGD(TAG, "Package to send: %s", serialPrint(messageSend, count).c_str());
 
 	// Sending package
-	if (serialConfig)
+	if (m_serialConfig)
     {
         // serialConfig->write(messageSend, count);
-        if (const auto writtenBytes = uart_write_bytes(serialConfig->uart_num, messageSend, count); writtenBytes < 0)
+        if (const auto writtenBytes = uart_write_bytes(m_serialConfig->uart_num, messageSend, count); writtenBytes < 0)
         {
-            ESP_LOGD(TAG, "uart_write_bytes failed: %s", esp_err_to_name(writtenBytes));
+            ESP_LOGE(TAG, "uart_write_bytes failed: %s", esp_err_to_name(writtenBytes));
             return -1;
         }
         else
@@ -257,29 +259,31 @@ bool VescUart::processReadPacket(uint8_t* message)
     {
     case COMM_FW_VERSION: // Structure defined here: https://github.com/vedderb/bldc/blob/43c3bbaf91f5052a35b75c2ff17b5fe99fad94d1/commands.c#L164
 
-        fw_version.major = message[index++];
-        fw_version.minor = message[index++];
+        m_fw_version.major = message[index++];
+        m_fw_version.minor = message[index++];
         return true;
     case COMM_GET_VALUES: // Structure defined here: https://github.com/vedderb/bldc/blob/43c3bbaf91f5052a35b75c2ff17b5fe99fad94d1/commands.c#L164
 
-        data.tempMosfet 		= buffer_get_float16(message, 10.0, &index); 	// 2 bytes - mc_interface_temp_fet_filtered()
-        data.tempMotor 			= buffer_get_float16(message, 10.0, &index); 	// 2 bytes - mc_interface_temp_motor_filtered()
-        data.avgMotorCurrent 	= buffer_get_float32(message, 100.0, &index); // 4 bytes - mc_interface_read_reset_avg_motor_current()
-        data.avgInputCurrent 	= buffer_get_float32(message, 100.0, &index); // 4 bytes - mc_interface_read_reset_avg_input_current()
+        m_data.tempMosfet 		= buffer_get_float16(message, 10.0, &index); 	// 2 bytes - mc_interface_temp_fet_filtered()
+        m_data.tempMotor 			= buffer_get_float16(message, 10.0, &index); 	// 2 bytes - mc_interface_temp_motor_filtered()
+        m_data.avgMotorCurrent 	= buffer_get_float32(message, 100.0, &index); // 4 bytes - mc_interface_read_reset_avg_motor_current()
+        m_data.avgInputCurrent 	= buffer_get_float32(message, 100.0, &index); // 4 bytes - mc_interface_read_reset_avg_input_current()
         index += 4; // Skip 4 bytes - mc_interface_read_reset_avg_id()
         index += 4; // Skip 4 bytes - mc_interface_read_reset_avg_iq()
-        data.dutyCycleNow 		= buffer_get_float16(message, 1000.0, &index); 	// 2 bytes - mc_interface_get_duty_cycle_now()
-        data.rpm 				= buffer_get_float32(message, 1.0, &index);		// 4 bytes - mc_interface_get_rpm()
-        data.inpVoltage 		= buffer_get_float16(message, 10.0, &index);		// 2 bytes - GET_INPUT_VOLTAGE()
-        data.ampHours 			= buffer_get_float32(message, 10000.0, &index);	// 4 bytes - mc_interface_get_amp_hours(false)
-        data.ampHoursCharged 	= buffer_get_float32(message, 10000.0, &index);	// 4 bytes - mc_interface_get_amp_hours_charged(false)
-        data.wattHours			= buffer_get_float32(message, 10000.0, &index);	// 4 bytes - mc_interface_get_watt_hours(false)
-        data.wattHoursCharged	= buffer_get_float32(message, 10000.0, &index);	// 4 bytes - mc_interface_get_watt_hours_charged(false)
-        data.tachometer 		= buffer_get_int32(message, &index);				// 4 bytes - mc_interface_get_tachometer_value(false)
-        data.tachometerAbs 		= buffer_get_int32(message, &index);				// 4 bytes - mc_interface_get_tachometer_abs_value(false)
-        data.error 				= (mc_fault_code)message[index++];								// 1 byte  - mc_interface_get_fault()
-        data.pidPos				= buffer_get_float32(message, 1000000.0, &index);	// 4 bytes - mc_interface_get_pid_pos_now()
-        data.id					= message[index++];								// 1 byte  - app_get_configuration()->controller_id
+        m_data.dutyCycleNow 		= buffer_get_float16(message, 1000.0, &index); 	// 2 bytes - mc_interface_get_duty_cycle_now()
+        m_data.rpm 				= buffer_get_float32(message, 1.0, &index);		// 4 bytes - mc_interface_get_rpm()
+        m_data.inpVoltage 		= buffer_get_float16(message, 10.0, &index);		// 2 bytes - GET_INPUT_VOLTAGE()
+        m_data.ampHours 			= buffer_get_float32(message, 10000.0, &index);	// 4 bytes - mc_interface_get_amp_hours(false)
+        m_data.ampHoursCharged 	= buffer_get_float32(message, 10000.0, &index);	// 4 bytes - mc_interface_get_amp_hours_charged(false)
+        m_data.wattHours			= buffer_get_float32(message, 10000.0, &index);	// 4 bytes - mc_interface_get_watt_hours(false)
+        m_data.wattHoursCharged	= buffer_get_float32(message, 10000.0, &index);	// 4 bytes - mc_interface_get_watt_hours_charged(false)
+        m_data.tachometer 		= buffer_get_int32(message, &index);				// 4 bytes - mc_interface_get_tachometer_value(false)
+        m_data.tachometerAbs 		= buffer_get_int32(message, &index);				// 4 bytes - mc_interface_get_tachometer_abs_value(false)
+        m_data.error 				= (mc_fault_code)message[index++];								// 1 byte  - mc_interface_get_fault()
+        m_data.pidPos				= buffer_get_float32(message, 1000000.0, &index);	// 4 bytes - mc_interface_get_pid_pos_now()
+        m_data.id					= message[index++];								// 1 byte  - app_get_configuration()->controller_id
+
+        m_lastVescUpdate = espchrono::millis_clock::now();
 
         return true;
 
@@ -511,19 +515,19 @@ void VescUart::printVescValues() const
             "tempMosfet=%f\n"
             "tempMotor=%f\n"
             "error=%d\n",
-            data.avgMotorCurrent,
-            data.avgInputCurrent,
-            data.dutyCycleNow,
-            data.rpm,
-            data.inpVoltage,
-            data.ampHours,
-            data.ampHoursCharged,
-            data.wattHours,
-            data.wattHoursCharged,
-            data.tachometer,
-            data.tachometerAbs,
-            data.tempMosfet,
-            data.tempMotor,
-            data.error
+            m_data.avgMotorCurrent,
+            m_data.avgInputCurrent,
+            m_data.dutyCycleNow,
+            m_data.rpm,
+            m_data.inpVoltage,
+            m_data.ampHours,
+            m_data.ampHoursCharged,
+            m_data.wattHours,
+            m_data.wattHoursCharged,
+            m_data.tachometer,
+            m_data.tachometerAbs,
+            m_data.tempMosfet,
+            m_data.tempMotor,
+            m_data.error
     );
 }
